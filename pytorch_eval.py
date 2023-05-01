@@ -12,6 +12,15 @@ import os,getopt
 import sys
 
 
+
+def get_device(i=0):
+    """Return gpu(i) if exists, otherwise return cpu().
+    Defined in :numref:`sec_use_gpu`"""
+    if torch.cuda.device_count() >= i + 1:
+        return torch.device(f'cuda:{i}')
+    return torch.device('cpu')
+
+
 # ------ AlexNet 模型创建 ----------
 
 def init_weights(m):
@@ -317,15 +326,39 @@ def accuracy(y_hat, y):
     return ret
 
 
+def evaluate_accuracy(net, data_iter, device):
+    """Compute the accuracy for a model on a dataset using a GPU.
+    Defined in :numref:`sec_lenet`"""
+    if isinstance(net, nn.Module):
+        net.eval()  # Set the model to evaluation mode
+        if not device:
+            device = next(iter(net.parameters())).device
+    # No. of correct predictions, no. of predictions
+    metric = Accumulator(2)
+
+    with torch.no_grad():
+        for X, y in data_iter:
+            if isinstance(X, list):
+                # Required for BERT Fine-tuning (to be covered later)
+                X = [x.to(device) for x in X]
+            else:
+                X = X.to(device)
+            y = y.to(device)
+            metric.add(accuracy(net(X), y), y.numel())
+    return metric[0] / metric[1]
+
+  
+"""  
 def evaluate_accuracy(net, data_iter):
     if isinstance(net, nn.Module):
         net.eval()
         metric = Accumulator(2)
         with torch.no_grad():
             for X,y in data_iter:
+                print("shape of input is ", X.shape)
                 metric.add(accuracy(net(X),y), y.numel())
     return metric[0]/metric[1]
-
+"""
 
 
 def main(argv):
@@ -342,13 +375,13 @@ def main(argv):
             sys.exit()
         elif opt in ("-m", "--model"):
             model_file = arg
-        elif opt in ("-p", "--ofile"):
+        elif opt in ("-p", "--path"):
             eval_data_path = arg
 
     print("in main")
 
 
-    device = torch.device('cpu')
+    device = get_device()
     checkpoint = torch.load(model_file, map_location=device)
     model_name = checkpoint['model_name']
 
@@ -369,7 +402,7 @@ def main(argv):
     load_model(net, checkpoint)
     net.eval()
 
-    acc = evaluate_accuracy(net, test_iter)
+    acc = evaluate_accuracy(net, test_iter, device)
     print(f"Accuracy: {acc:.3f}")
     
 
