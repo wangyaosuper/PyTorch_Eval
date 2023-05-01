@@ -247,23 +247,17 @@ def create_ResNet():
     return net
 
 # ---------- 加载模型 ----------
-def load_model(file_name):
-    for file_name in os.listdir(path):
-        if (model_name in file_name) and ("checkpoint.pth" in file_name):
-            target_name = path + "/" + file_name
-            checkpoint = torch.load(target_name)
-            if not model_name == checkpoint['model_name']:
-                continue
-            net.load_state_dict(checkpoint['model_state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            epoch = checkpoint['epoch']
-            test_acc = checkpoint['test_acc']
-            train_acc = checkpoint['train_acc']
-            loss = checkpoint['loss']
-            print("Load model ", file_name, f": model={model_name}, epoch={epoch}")
-            print(f"Load this model with loss={loss:.3f}, test_acc={test_acc:.3f}, train_acc={train_acc:.3f}")
-            return model_name, net
-    return epoch
+def load_model(net, checkpoint):
+    net.load_state_dict(checkpoint['model_state_dict'])
+    model_name = checkpoint['model_name']
+    epoch = checkpoint['epoch']
+    test_acc = checkpoint['test_acc']
+    train_acc = checkpoint['train_acc']
+    loss = checkpoint['loss']
+    print("Load model ", f": {model_name} , epoch={epoch}")
+    print(f"Load this model with loss={loss:.3f}, test_acc={test_acc:.3f}, train_acc={train_acc:.3f}")
+    return
+ 
 
 
 
@@ -293,6 +287,11 @@ def load_data_fashion_mnist(batch_size, resize=None):
 
 
 # ----- lab -----
+
+reduce_sum = lambda x, *args, **kwargs: x.sum(*args, **kwargs)
+argmax = lambda x, *args, **kwargs: x.argmax(*args, **kwargs)
+astype = lambda x, *args, **kwargs: x.type(*args, **kwargs)
+
 
 class Accumulator:
     """For accumulating sums over `n` variables."""
@@ -334,12 +333,12 @@ def main(argv):
     try:
         opts, args = getopt.getopt(argv,"hm:p:",["model=","path="])
     except getopt.GetoptError:
-        print 'pytorch_eval.py -m <model_checkpoint_file> -p <path_of_the_files_for_eval>'
+        print('pytorch_eval.py -m <model_checkpoint_file> -p <path_of_the_files_for_eval>')
         sys.exit(2)
 
     for opt, arg in opts:
         if opt == ('-h'):
-            print 'pytorch_eval.py -m <model_checkpoint_file> -p <path_of_the_files_for_eval>'
+            print('pytorch_eval.py -m <model_checkpoint_file> -p <path_of_the_files_for_eval>')
             sys.exit()
         elif opt in ("-m", "--model"):
             model_file = arg
@@ -348,12 +347,15 @@ def main(argv):
 
     print("in main")
 
-    model_name, net = load_model(model_file)
-    
+
+    device = torch.device('cpu')
+    checkpoint = torch.load(model_file, map_location=device)
+    model_name = checkpoint['model_name']
+
     train_iter, test_iter = load_data_fashion_mnist(batch_size=128, resize=224)
 
     model_switcher = {
-        'AlexNet':create_Alexnet,
+        'AlexNet':create_AlexNet,
         'AlexNet_With_L2Pool':create_AlexNet_With_L2Pool,
         'NinNet':create_NinNet,
         'GoogLeNet':create_GoogLeNet,
@@ -363,7 +365,8 @@ def main(argv):
         print(f"Error !!! Model:{model_name} is not supported")
         sys.exit(2)
 
-    net = model_switcher.get(model_name)()
+    model_name, net = model_switcher.get(model_name)()
+    load_model(net, checkpoint)
     net.eval()
 
     acc = evaluate_accuracy(net, test_iter)
