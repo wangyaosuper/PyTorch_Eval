@@ -11,6 +11,7 @@ from torch.utils import data
 import os,getopt
 import sys
 
+from PIL import Image
 
 
 def get_device(i=0):
@@ -221,7 +222,7 @@ class Residual(nn.Module):
         if self.conv3:
             X = self.conv3(X)
         Y = Y + X
-        return "ResNet", nn.functional.relu(Y)
+        return nn.functional.relu(Y)
 
 def resnet_block(input_channels, num_channels, num_residuals,
                  first_block=False):
@@ -247,13 +248,13 @@ def create_ResNet():
     net = nn.Sequential(b1, b2, b3, b4, b5, 
                         nn.AdaptiveAvgPool2d((1, 1)),
                         nn.Flatten(), nn.Linear(512, 10))
-    X = torch.rand(size=(1, 1, 96, 96))
+    X = torch.rand(size=(1, 1, 224, 224))
     for layer in net:
         X = layer(X)
         print(layer.__class__.__name__,'output shape:\t', X.shape)
 
     net.apply(init_weights)
-    return net
+    return "ResNet", net
 
 # ---------- 加载模型 ----------
 def load_model(net, checkpoint):
@@ -272,27 +273,19 @@ def load_model(net, checkpoint):
 
 # ----------- 数据加载 ----------
 
-def get_dataloader_workers():
-    """Use 4 processes to read the data.
-    Defined in :numref:`sec_fashion_mnist`"""
-    return 1
-
-def load_data_fashion_mnist(batch_size, resize=None):
-    """Download the Fashion-MNIST dataset and then load it into memory.
-    Defined in :numref:`sec_fashion_mnist`"""
-    trans = [transforms.ToTensor()]
-    if resize:
-        trans.insert(0, transforms.Resize(resize))
-    trans = transforms.Compose(trans)
-    mnist_train = torchvision.datasets.FashionMNIST(
-        root="../data", train=True, transform=trans, download=True)
-    mnist_test = torchvision.datasets.FashionMNIST(
-        root="../data", train=False, transform=trans, download=True)
-    return (data.DataLoader(mnist_train, batch_size, shuffle=True,
-                            num_workers=get_dataloader_workers()),
-            data.DataLoader(mnist_test, batch_size, shuffle=False,
-                            num_workers=get_dataloader_workers()))
-
+def load_images(path):
+    target_list = []
+    for file_name in os.listdir(path):
+        if (".png" in file_name) or (".jpeg" in file_name) or (".jpg" in file_name) or (".bmp" in file_name):
+            target_file_path = path+'/'+file_name
+            transform_valid = transforms.Compose([transforms.Resize(224),
+                                                  transforms.Grayscale(num_output_channels=1),
+                                                  transforms.ToTensor()]) 
+            img = Image.open(target_file_path)
+            img_ = transform_valid(img).unsqueeze(0)
+            print(img_.shape)
+            target_list.append((file_name, img_))
+    return target_list
 
 
 # ----- lab -----
@@ -326,7 +319,7 @@ def accuracy(y_hat, y):
     return ret
 
 
-def evaluate_accuracy(net, data_iter, device):
+def evaluate_accuracy(net, data_iter, device=None):
     """Compute the accuracy for a model on a dataset using a GPU.
     Defined in :numref:`sec_lenet`"""
     if isinstance(net, nn.Module):
@@ -347,6 +340,18 @@ def evaluate_accuracy(net, data_iter, device):
             metric.add(accuracy(net(X), y), y.numel())
     return metric[0] / metric[1]
 
+
+def eval_test_list(net, target_list, device, label_dist):
+    if isinstance(net, nn.Module):
+        net.eval()  # Set the model to evaluation mode
+        if not device:
+            device = next(iter(net.parameters())).device
+    with torch.no_grad():
+        for (file_path_name, img_) in target_list:
+            tensor_ = net(img_)
+            print(f"File Name:{file_path_name},  Result:")
+            for i in range(0,10):
+                print(f"    {label_dist[i]} : {tensor_[0][i]:.3f}")
   
 """  
 def evaluate_accuracy(net, data_iter):
@@ -360,9 +365,35 @@ def evaluate_accuracy(net, data_iter):
     return metric[0]/metric[1]
 """
 
+FASHION_MINST_LABEL_DIST = {
+    0:'T-Shirt/TOP',
+    1:'Trouser',
+    2:'Pullover',
+    3:'Dress',
+    4:'Coat',
+    5:'Sandals',
+    6:'Shirt',
+    7:'Sneak',
+    8:'Bag',
+    9:'Ankle boot'}
+
+
+CIFAR_10_LABEL_DIST = {
+    0:'airplane',
+    1:'automobile',
+    2:'bird',
+    3:'cat',
+    4:'deer',
+    5:'dog',
+    6:'frog',
+    7:'horse',
+    8:'ship',
+    9:'truck'}
+
 
 def main(argv):
 
+  
     try:
         opts, args = getopt.getopt(argv,"hm:p:",["model=","path="])
     except getopt.GetoptError:
@@ -382,10 +413,13 @@ def main(argv):
 
 
     device = get_device()
+
+    # Test Data Load
+    test_list = load_images(eval_data_path)
+
+    # Load Model
     checkpoint = torch.load(model_file, map_location=device)
     model_name = checkpoint['model_name']
-
-    train_iter, test_iter = load_data_fashion_mnist(batch_size=128, resize=224)
 
     model_switcher = {
         'AlexNet':create_AlexNet,
@@ -402,10 +436,7 @@ def main(argv):
     load_model(net, checkpoint)
     net.eval()
 
-    acc = evaluate_accuracy(net, test_iter, device)
-    print(f"Accuracy: {acc:.3f}")
-    
-
+    acc = eval_test_list(net, test_list, device, CIFAR_10_LABEL_DIST)
     print("out main")
 
 
